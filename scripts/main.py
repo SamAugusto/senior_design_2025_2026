@@ -1,6 +1,6 @@
 import pandas as pd
 from collections import defaultdict
-
+# Remember to add functions instead of leaving the code like this
 if __name__ == "__main__":
     # Molecule id with Ref_ED
 
