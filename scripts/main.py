@@ -179,13 +179,8 @@ def main():
 
 
 
-    # % of aligment molecule to contig or reference idk how to do this yet?
 
-
-    # account for orientation
-    # include distance to decide in the molecular bins
-    # count each label(row past the distance)
-    ## Ex moleculde_id#_(row_count,distance_to_end)
+    # account for orientation?
 
     # save it in a txt can change later
 
