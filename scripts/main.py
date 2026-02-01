@@ -1,10 +1,12 @@
 import pandas as pd
 from collections import defaultdict
-
+import numpy as np
 def selecting_molecules(df):
     '''Selecting all molecules possible function '''
-    unique_df = df.drop_duplicates(subset=["Molecule ID"])
-    molec_id = dict(zip(unique_df["Molecule ID"], unique_df["Ref_End"]))
+    unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "last")
+    #print(unique_df)
+    molec_id = dict(zip(unique_df["Molecule ID"], zip(unique_df["Qmap_position"],unique_df["siteID"])))
+    print(molec_id)
     return molec_id
 
 def mk_categories():
@@ -15,53 +17,134 @@ def mk_categories():
         bins[cats]
     return bins
 
+def finding_averages(df,contig,molec_id):
 
-def classify_molecules(df,bins,molec_id,contig):
+    general_dist_array = []
+    contig_gap_dist = defaultdict(list)
+    for molecule in molec_id.keys():
+        # The try is to stop index error for molecules that do not have contig site
+        try:
+            mask = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig)
+            distance = molec_id[molecule][0] - df[mask].iloc[0,5]
+            general_dist_array.append(abs(distance))
+
+
+            for i in range(0,11):
+                if contig + 5 - i == contig:
+                    continue
+                mask_i = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig + 5 - i) # The 5 here is to capture more molecules extending the range to 31 to 21 if contig 26 else for any other contig +,- 5
+                gap_distance = abs(df[mask].iloc[0,5] - df[mask_i].iloc[0,5])
+                contig_gap_dist[contig+5-i].append(gap_distance)
+        except IndexError:
+            continue
+        
+    # averaging
+    general_dist_avg = np.average(general_dist_array)
+
+
+    contig_gap_dist_avg = {}
+    for contigs, avgs in contig_gap_dist.items():
+        contig_gap_dist_avg[contigs] = np.average(avgs)
+
+    return general_dist_avg,contig_gap_dist_avg
+    
+
+
+    
+
+
+
+
+
+def classify_molecules(df,bins,molec_id,contig,total_avg,gap_avg):
+    
+
 
     '''
-    # 25
-    # Molecule classification function waiting on Dr. Xiao to confirm logic and help what to do with molecules that
-    # do not have the current select contig
-
-    #### Important note: contig 25 should not be hard setted and should be changed to a input that makes the most sense
-    # Because since we are choosing the contig it might differ in every run so the user should be prompted
-
-
-    ### Changes
-    # If it does not have the selected contig add +0 untill 5 and cannot find a starting position at {contig+1...}
-
-
     '''
     for molecule in molec_id.keys():
         # check with Dr. Xiao for automating this contig choice if possible
         mask = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig)
+        
+        # Checking if molecule does not have contig site 
         try:
             idx = df.index[mask][0]
         except IndexError:
-            print(f"Molecule {molecule} does not have contig site 26")
+            # using averages
+            check = True
+            contig_cp = contig + 5
+            while check:
+                if contig_cp < min(gap_avg.keys()):
+                    print(f"This molecule {molecule} contig is beyond 5 ranges bellow the defined initial contig")
+                    break
+                contig_cp -=1
+                mask = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig_cp)
+
+                try:
+                    idx = df.index[mask][0]
+                    red_mask_before = df.iloc[idx - 1, 6]
+                    red_mask_after  = df.iloc[idx + 1, 6]
+                    check = False
+                    distance_kb = total_avg + gap_avg[contig_cp]
+                    row_pos = df[mask].iloc[0,7]
+                    row_distance = molec_id[molecule][1] - row_pos
+
+      
+        
+                
+                    if distance_kb >= 10_000 and (red_mask_before == 1 or red_mask_after == 1):
+                        bins["fused_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+                        #print(f"Adding molecule {molecule} to fused_telomere ")
+                    elif distance_kb >= 10_000 and not (red_mask_before == 1 or red_mask_after == 1):
+                        bins["fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+                        #print(f"Adding molecule {molecule} to fused_no_telomere ")
+                    elif distance_kb < 10_000 and (red_mask_before == 1 or red_mask_after == 1):
+                        bins["not_fused_telomere_(normal)"].add(f"{molecule}_({distance_kb},{row_distance})")
+                        #print(f"Adding molecule {molecule} to not_fused_telomere_(normal) ")
+                    elif distance_kb < 10_000 and not (red_mask_before == 1 or red_mask_after == 1):
+                        bins["not_fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+                        #print(f"Adding molecule {molecule} to not_fused_no_telomere ")
+                    else:
+                        print("Something is not working properly this scope should never be acessed")
+                except IndexError:
+                    continue
+            print(f"molecule {molecule} did not have contig 26 using average data to classify it")
             continue
+
+            
+        
+        # Checking for telomere next to the chosen contig site
         red_mask_before = df.iloc[idx - 1, 6]
         red_mask_after  = df.iloc[idx + 1, 6]
-        print("Red_mask_After: ",red_mask_after)
-        print("Red_mask_before: ",red_mask_before)
+      
         
-        contig_site = df[mask].iloc[0,-1]
-        distance_kb = molec_id[molecule] - contig_site 
-        print("distance: ",distance_kb)
-        if distance_kb >= 100_000 and (red_mask_before == 1 or red_mask_after == 1):
-            bins["fused_telomere"].add(molecule)
-            print(f"Adding molecule {molecule} to fused_telomere ")
-        elif distance_kb >= 100_000 and not (red_mask_before == 1 or red_mask_after == 1):
-            bins["fused_no_telomere"].add(molecule)
-            print(f"Adding molecule {molecule} to fused_no_telomere ")
-        elif distance_kb < 100_000 and (red_mask_before == 1 or red_mask_after == 1):
-            bins["not_fused_telomere_(normal)"].add(molecule)
-            print(f"Adding molecule {molecule} to not_fused_telomere_(normal) ")
-        elif distance_kb < 100_000 and not (red_mask_before == 1 or red_mask_after == 1):
-            bins["not_fused_no_telomere"].add(molecule)
-            print(f"Adding molecule {molecule} to not_fused_no_telomere ")
+
+        # Getting qmap postion
+        qmap_pos = df[mask].iloc[0,5] 
+        distance_kb = molec_id[molecule][0] - qmap_pos
+        # Getting row position
+        row_pos = df[mask].iloc[0,7]
+        row_distance = molec_id[molecule][1] - row_pos
+        
+
+            
+        
+
+        if distance_kb >= 10_000 and (red_mask_before == 1 or red_mask_after == 1):
+            bins["fused_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+            #print(f"Adding molecule {molecule} to fused_telomere ")
+        elif distance_kb >= 10_000 and not (red_mask_before == 1 or red_mask_after == 1):
+            bins["fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+            #print(f"Adding molecule {molecule} to fused_no_telomere ")
+        elif distance_kb < 10_000 and (red_mask_before == 1 or red_mask_after == 1):
+            bins["not_fused_telomere_(normal)"].add(f"{molecule}_({distance_kb},{row_distance})")
+            #print(f"Adding molecule {molecule} to not_fused_telomere_(normal) ")
+        elif distance_kb < 10_000 and not (red_mask_before == 1 or red_mask_after == 1):
+            bins["not_fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+            #print(f"Adding molecule {molecule} to not_fused_no_telomere ")
         else:
             print("Something is not working properly this scope should never be acessed")
+        
     return bins
  
 def main():
@@ -76,8 +159,10 @@ def main():
     empty_bins =  mk_categories()
     
     contig = int(input("Insert the contig chosen (must be an integer): "))
-
-    bins = classify_molecules(df,empty_bins,molec_id,contig)
+    
+    general_dist_avg,contig_gap_dist_avg = finding_averages(df,contig,molec_id) 
+    
+    bins = classify_molecules(df,empty_bins,molec_id,contig,general_dist_avg,contig_gap_dist_avg)
 
     
     print(bins)
@@ -87,6 +172,8 @@ def main():
     for classification, molecules in bins.items():
         percent = round(100 * len(molecules) / total, 3)
         print(f"{classification}: {percent}%")
+    print("Printing AVGS")
+    print(general_dist_avg,contig_gap_dist_avg)
 
 
 
