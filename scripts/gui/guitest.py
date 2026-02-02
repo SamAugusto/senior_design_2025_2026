@@ -5,7 +5,7 @@ import os
 import csv
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 
-
+# add analysis code in the lines 350 later one when finalized - still developing other functionalities of the code
 class EnhancedFileApp:
     def __init__(self, root):
         self.root = root
