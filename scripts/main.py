@@ -1,9 +1,19 @@
 import pandas as pd
 from collections import defaultdict
 import numpy as np
-def selecting_molecules(df):
+def selecting_molecules(df,chromossome):
     '''Selecting all molecules possible function '''
-    unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "last")
+    if "p" in chromossome and "+" in chromossome:
+        unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "first")
+    elif "p" in chromossome and "-" in chromossome:
+        unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "last")
+    elif "q" in chromossome and "+" in chromossome:
+        unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "last")
+    elif "q" in chromossome and "-" in chromossome:
+        unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "first")
+    else:
+        raise TypeError("Invalid chromossome inputted")
+
     #print(unique_df)
     molec_id = dict(zip(unique_df["Molecule ID"], zip(unique_df["Qmap_position"],unique_df["siteID"])))
     print(molec_id)
@@ -22,25 +32,42 @@ def finding_averages(df,contig,molec_id):
     general_dist_array = []
     contig_gap_dist = defaultdict(list)
     for molecule in molec_id.keys():
+        mask = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig)
         # The try is to stop index error for molecules that do not have contig site
         try:
-            mask = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig)
-            distance = molec_id[molecule][0] - df[mask].iloc[0,5]
-            general_dist_array.append(abs(distance))
+            idx = df.index[mask][0]
+            current_pos = df.iloc[idx, 5]
+            red_mask_before = df.iloc[idx - 1, 6]
+            red_mask_after  = df.iloc[idx + 1, 6]
+            if (red_mask_before == 1 or red_mask_after == 1):
+                    if red_mask_before == 1:
+                        neighbor_pos = df.iloc[idx - 1, 5]
+                        distance = current_pos - neighbor_pos
+                        general_dist_array.append(distance)
+
+                    if red_mask_after == 1:
+                        neighbor_pos = df.iloc[idx + 1, 5]
+                        distance = current_pos - neighbor_pos
+                        general_dist_array.append(distance)
+            else:
+                pass
 
 
             for i in range(0,11):
                 if contig + 5 - i == contig:
                     continue
                 mask_i = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig + 5 - i) # The 5 here is to capture more molecules extending the range to 31 to 21 if contig 26 else for any other contig +,- 5
-                gap_distance = abs(df[mask].iloc[0,5] - df[mask_i].iloc[0,5])
-                contig_gap_dist[contig+5-i].append(gap_distance)
+                if not df[mask_i].empty:
+                    gap_distance = abs(df[mask].iloc[0,5] - df[mask_i].iloc[0,5])
+                    contig_gap_dist[contig+5-i].append(gap_distance)
+                else:
+                    continue
         except IndexError:
             continue
         
     # averaging
     general_dist_avg = np.average(general_dist_array)
-
+    print("priting label distance avg: ", general_dist_avg)
 
     contig_gap_dist_avg = {}
     for contigs, avgs in contig_gap_dist.items():
@@ -56,7 +83,7 @@ def finding_averages(df,contig,molec_id):
 
 
 
-def classify_molecules(df,bins,molec_id,contig,total_avg,gap_avg):
+def classify_molecules(df,bins,molec_id,contig,label_avg,gap_avg):
     
 
 
@@ -72,12 +99,14 @@ def classify_molecules(df,bins,molec_id,contig,total_avg,gap_avg):
         except IndexError:
             # using averages
             check = True
-            contig_cp = contig + 5
+            contig_cp_lst = [contig-1,contig+1,contig-2,contig+2,contig-3,contig+3,contig-4,contig+4,contig-5,contig+5]
+            contig_cp_idx = -1
             while check:
-                if contig_cp < min(gap_avg.keys()):
+                if contig_cp_idx >= len(contig_cp_lst):
                     print(f"This molecule {molecule} contig is beyond 5 ranges bellow the defined initial contig")
                     break
-                contig_cp -=1
+                contig_cp_idx +=1
+                contig_cp = contig_cp_lst[contig_cp_idx]
                 mask = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig_cp)
 
                 try:
@@ -85,30 +114,46 @@ def classify_molecules(df,bins,molec_id,contig,total_avg,gap_avg):
                     red_mask_before = df.iloc[idx - 1, 6]
                     red_mask_after  = df.iloc[idx + 1, 6]
                     check = False
-                    distance_kb = total_avg + gap_avg[contig_cp]
-                    row_pos = df[mask].iloc[0,7]
-                    row_distance = molec_id[molecule][1] - row_pos
-
+                    print(f"molecule {molecule} did not have contig 26 using average data to classify it")
       
         
                 
-                    if distance_kb >= 10_000 and (red_mask_before == 1 or red_mask_after == 1):
-                        bins["fused_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
-                        #print(f"Adding molecule {molecule} to fused_telomere ")
-                    elif distance_kb >= 10_000 and not (red_mask_before == 1 or red_mask_after == 1):
-                        bins["fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
-                        #print(f"Adding molecule {molecule} to fused_no_telomere ")
-                    elif distance_kb < 10_000 and (red_mask_before == 1 or red_mask_after == 1):
-                        bins["not_fused_telomere_(normal)"].add(f"{molecule}_({distance_kb},{row_distance})")
-                        #print(f"Adding molecule {molecule} to not_fused_telomere_(normal) ")
-                    elif distance_kb < 10_000 and not (red_mask_before == 1 or red_mask_after == 1):
-                        bins["not_fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
-                        #print(f"Adding molecule {molecule} to not_fused_no_telomere ")
+                    # classification if label found
+                    if (red_mask_before == 1 or red_mask_after == 1):
+                        if red_mask_before == 1:
+                            qmap_pos = df.iloc[idx - 1, 5]
+                            distance_kb = abs(molec_id[molecule][0] - qmap_pos) 
+                            row_pos = df.iloc[idx - 1, 7]
+                            row_distance = abs(molec_id[molecule][1] - row_pos)
+                        else:
+                            qmap_pos = df.iloc[idx + 1, 5]
+                            distance_kb = abs(molec_id[molecule][0] - qmap_pos) 
+                            row_pos = df.iloc[idx + 1, 7]
+                            row_distance = abs(molec_id[molecule][1] - row_pos)
+                        
+                        if distance_kb >=10_000:
+                            bins["fused_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+                            #print(f"Adding molecule {molecule} to fused_telomere ")
+                        else:
+                            bins["not_fused_telomere_(normal)"].add(f"{molecule}_({distance_kb},{row_distance})")
+                            #print(f"Adding molecule {molecule} to not_fused_telomere_(normal) ")
+                           
+                    # Classification if label not found
                     else:
-                        print("Something is not working properly this scope should never be acessed")
+                        qmap_pos = df[mask].iloc[0,5] + label_avg + gap_avg[contig_cp]
+                        distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+                        row_pos = df[mask].iloc[0,7]
+                        row_distance = abs(molec_id[molecule][1] - row_pos)
+                        if distance_kb >=10_000:
+                            bins["fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+                            #print(f"Adding molecule {molecule} to fused_no_telomere ")
+                        else:
+                            bins["not_fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+                            #print(f"Adding molecule {molecule} to not_fused_no_telomere ")
+
+        
                 except IndexError:
                     continue
-            print(f"molecule {molecule} did not have contig 26 using average data to classify it")
             continue
 
             
@@ -120,41 +165,63 @@ def classify_molecules(df,bins,molec_id,contig,total_avg,gap_avg):
         
 
         # Getting qmap postion
-        qmap_pos = df[mask].iloc[0,5] 
-        distance_kb = molec_id[molecule][0] - qmap_pos
+        #qmap_pos = df[mask].iloc[0,5] 
+        #distance_kb = abs(molec_id[molecule][0] - qmap_pos)
         # Getting row position
-        row_pos = df[mask].iloc[0,7]
-        row_distance = molec_id[molecule][1] - row_pos
+        #row_pos = df[mask].iloc[0,7]
+        #row_distance = abs(molec_id[molecule][1] - row_pos)
         
 
             
         
-
-        if distance_kb >= 10_000 and (red_mask_before == 1 or red_mask_after == 1):
-            bins["fused_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
-            #print(f"Adding molecule {molecule} to fused_telomere ")
-        elif distance_kb >= 10_000 and not (red_mask_before == 1 or red_mask_after == 1):
-            bins["fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
-            #print(f"Adding molecule {molecule} to fused_no_telomere ")
-        elif distance_kb < 10_000 and (red_mask_before == 1 or red_mask_after == 1):
-            bins["not_fused_telomere_(normal)"].add(f"{molecule}_({distance_kb},{row_distance})")
-            #print(f"Adding molecule {molecule} to not_fused_telomere_(normal) ")
-        elif distance_kb < 10_000 and not (red_mask_before == 1 or red_mask_after == 1):
-            bins["not_fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
-            #print(f"Adding molecule {molecule} to not_fused_no_telomere ")
+        # classification if label found
+        if (red_mask_before == 1 or red_mask_after == 1):
+            if red_mask_before == 1:
+                qmap_pos = df.iloc[idx - 1, 5]
+                distance_kb = abs(molec_id[molecule][0] - qmap_pos) 
+                row_pos = df.iloc[idx - 1, 7]
+                row_distance = abs(molec_id[molecule][1] - row_pos)
+            else:
+                qmap_pos = df.iloc[idx + 1, 5]
+                distance_kb = abs(molec_id[molecule][0] - qmap_pos) 
+                row_pos = df.iloc[idx + 1, 7]
+                row_distance = abs(molec_id[molecule][1] - row_pos)
+            
+            if distance_kb >=10_000:
+                bins["fused_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+                #print(f"Adding molecule {molecule} to fused_telomere ")
+                
+            else:
+                bins["not_fused_telomere_(normal)"].add(f"{molecule}_({distance_kb},{row_distance})")
+                #print(f"Adding molecule {molecule} to not_fused_telomere_(normal) ")
+               
+        # Classification if label not found
         else:
-            print("Something is not working properly this scope should never be acessed")
+            qmap_pos = df[mask].iloc[0,5] + label_avg
+            distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+            row_pos = df[mask].iloc[0,7]
+            row_distance = abs(molec_id[molecule][1] - row_pos)
+            if distance_kb >=10_000:
+                bins["fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+                #print(f"Adding molecule {molecule} to fused_no_telomere ")
+            else:
+                bins["not_fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
+                #print(f"Adding molecule {molecule} to not_fused_no_telomere ")
+
         
     return bins
  
 def main():
-    # Molecule id with Ref_ED
+    # Molecule id with qmappos
 
     # Just reading data this can be a input instead of hard setted 
     # if this is an input = "path to the csv" output1/result csv
     df = pd.read_csv("../data/output1/Result_sgTelo_target_Mol_data 2.csv.gz")
 
-    molec_id = selecting_molecules(df)
+    chromossome = input("insert chromossome and orientation: ")
+
+    #df = pd.read_excel("../data/output1/4 types of contigs 8 samples.xlsx",sheet_name = chromossome)
+    molec_id = selecting_molecules(df,chromossome)
 
     empty_bins =  mk_categories()
     
@@ -196,3 +263,9 @@ if __name__ == "__main__":
 
 
     
+
+    
+
+
+
+ 
