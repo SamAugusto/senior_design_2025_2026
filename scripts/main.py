@@ -1,21 +1,13 @@
 import pandas as pd
 from collections import defaultdict
 import numpy as np
-def selecting_molecules(df,chromossome):
+def selecting_molecules(df):
     '''Selecting all molecules possible function '''
-    if "p" in chromossome and "+" in chromossome:
-        unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "first")
-    elif "p" in chromossome and "-" in chromossome:
-        unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "last")
-    elif "q" in chromossome and "+" in chromossome:
-        unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "last")
-    elif "q" in chromossome and "-" in chromossome:
-        unique_df = df.drop_duplicates(subset=["Molecule ID"],keep = "first")
-    else:
-        raise TypeError("Invalid chromossome inputted")
+    unique_df_min = df.drop_duplicates(subset=["Molecule ID"],keep = "first")
+    unique_df_max = df.drop_duplicates(subset=["Molecule ID"],keep = "last")
 
     #print(unique_df)
-    molec_id = dict(zip(unique_df["Molecule ID"], zip(unique_df["Qmap_position"],unique_df["siteID"])))
+    molec_id = dict(zip(unique_df_min["Molecule ID"], zip(unique_df_min["Qmap_position"],unique_df_min["siteID"],unique_df_max["Qmap_position"],unique_df_max["siteID"],unique_df_min["Ori"])))
     print(molec_id)
     return molec_id
 
@@ -83,7 +75,7 @@ def finding_averages(df,contig,molec_id):
 
 
 
-def classify_molecules(df,bins,molec_id,contig,label_avg,gap_avg):
+def classify_molecules(df,bins,molec_id,contig,label_avg,gap_avg,chrom_orientation):
     
 
 
@@ -141,9 +133,23 @@ def classify_molecules(df,bins,molec_id,contig,label_avg,gap_avg):
                     # Classification if label not found
                     else:
                         qmap_pos = df[mask].iloc[0,5] + label_avg + gap_avg[contig_cp]
-                        distance_kb = abs(molec_id[molecule][0] - qmap_pos)
                         row_pos = df[mask].iloc[0,7]
-                        row_distance = abs(molec_id[molecule][1] - row_pos)
+                        
+                        if "p" in chrom_orientation and molec_id[molecule][-1] == "+":
+                            distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+                            row_distance = abs(molec_id[molecule][1]- row_pos)
+                        elif "p" in chrom_orientation and molec_id[molecule][-1] == "-":
+                            distance_kb = abs(molec_id[molecule][2] - qmap_pos)
+                            row_distance = abs(molec_id[molecule][3] - row_pos)
+                        elif "q" in chrom_orientation and molec_id[molecule][-1] == "+":
+                            distance_kb = abs(molec_id[molecule][2] - qmap_pos)
+                            row_distance = abs(molec_id[molecule][3] - row_pos)
+                        elif "q" in chrom_orientation and molec_id[molecule][-1] == "-":
+                            distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+                            row_distance = abs(molec_id[molecule][1]- row_pos)
+                        else:
+                            raise Exception("This should never be reached something went wrong")
+
                         if distance_kb >=10_000:
                             bins["fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
                             #print(f"Adding molecule {molecule} to fused_no_telomere ")
@@ -175,17 +181,49 @@ def classify_molecules(df,bins,molec_id,contig,label_avg,gap_avg):
             
         
         # classification if label found
+# molec_id = dict(zip(unique_df_min["Molecule ID"], zip(unique_df_min["Qmap_position"],unique_df_min["siteID"],unique_df_max["Qmap_position"],unique_df_max["siteID"],unique_df_min["Ori"])))
         if (red_mask_before == 1 or red_mask_after == 1):
             if red_mask_before == 1:
                 qmap_pos = df.iloc[idx - 1, 5]
-                distance_kb = abs(molec_id[molecule][0] - qmap_pos) 
                 row_pos = df.iloc[idx - 1, 7]
-                row_distance = abs(molec_id[molecule][1] - row_pos)
+                if "p" in chrom_orientation and molec_id[molecule][-1] == "+":
+                    distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+                    row_distance = abs(molec_id[molecule][1]- row_pos)
+                elif "p" in chrom_orientation and molec_id[molecule][-1] == "-":
+                    distance_kb = abs(molec_id[molecule][2] - qmap_pos)
+                    row_distance = abs(molec_id[molecule][3] - row_pos)
+                elif "q" in chrom_orientation and molec_id[molecule][-1] == "+":
+                    distance_kb = abs(molec_id[molecule][2] - qmap_pos)
+                    row_distance = abs(molec_id[molecule][3] - row_pos)
+                elif "q" in chrom_orientation and molec_id[molecule][-1] == "-":
+                    distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+                    row_distance = abs(molec_id[molecule][1]- row_pos)
+                else:
+                    raise Exception("This should never be reached something went wrong")
+
+
+                
+ 
+
             else:
                 qmap_pos = df.iloc[idx + 1, 5]
-                distance_kb = abs(molec_id[molecule][0] - qmap_pos) 
                 row_pos = df.iloc[idx + 1, 7]
-                row_distance = abs(molec_id[molecule][1] - row_pos)
+                if "p" in chrom_orientation and molec_id[molecule][-1] == "+":
+                    distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+                    row_distance = abs(molec_id[molecule][1]- row_pos)
+                elif "p" in chrom_orientation and molec_id[molecule][-1] == "-":
+                    distance_kb = abs(molec_id[molecule][2] - qmap_pos)
+                    row_distance = abs(molec_id[molecule][3] - row_pos)
+                elif "q" in chrom_orientation and molec_id[molecule][-1] == "+":
+                    distance_kb = abs(molec_id[molecule][2] - qmap_pos)
+                    row_distance = abs(molec_id[molecule][3] - row_pos)
+                elif "q" in chrom_orientation and molec_id[molecule][-1] == "-":
+                    distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+                    row_distance = abs(molec_id[molecule][1]- row_pos)
+                else:
+                    raise Exception("This should never be reached something went wrong")
+
+
             
             if distance_kb >=10_000:
                 bins["fused_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
@@ -197,10 +235,25 @@ def classify_molecules(df,bins,molec_id,contig,label_avg,gap_avg):
                
         # Classification if label not found
         else:
+
             qmap_pos = df[mask].iloc[0,5] + label_avg
-            distance_kb = abs(molec_id[molecule][0] - qmap_pos)
             row_pos = df[mask].iloc[0,7]
-            row_distance = abs(molec_id[molecule][1] - row_pos)
+
+            if "p" in chrom_orientation and molec_id[molecule][-1] == "+":
+                distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+                row_distance = abs(molec_id[molecule][1]- row_pos)
+            elif "p" in chrom_orientation and molec_id[molecule][-1] == "-":
+                distance_kb = abs(molec_id[molecule][2] - qmap_pos)
+                row_distance = abs(molec_id[molecule][3] - row_pos)
+            elif "q" in chrom_orientation and molec_id[molecule][-1] == "+":
+                distance_kb = abs(molec_id[molecule][2] - qmap_pos)
+                row_distance = abs(molec_id[molecule][3] - row_pos)
+            elif "q" in chrom_orientation and molec_id[molecule][-1] == "-":
+                distance_kb = abs(molec_id[molecule][0] - qmap_pos)
+                row_distance = abs(molec_id[molecule][1]- row_pos)
+            else:
+                raise Exception("This should never be reached something went wrong")
+
             if distance_kb >=10_000:
                 bins["fused_no_telomere"].add(f"{molecule}_({distance_kb},{row_distance})")
                 #print(f"Adding molecule {molecule} to fused_no_telomere ")
@@ -216,12 +269,14 @@ def main():
 
     # Just reading data this can be a input instead of hard setted 
     # if this is an input = "path to the csv" output1/result csv
-    df = pd.read_csv("../data/output1/Result_sgTelo_target_Mol_data 2.csv.gz")
+    #df = pd.read_csv("../data/output1/Result_sgTelo_target_Mol_data 2.csv.gz")
 
-    chromossome = input("insert chromossome and orientation: ")
+    chromossome = input("insert chromossome: ")
+    orientation = input("insert orientation: ")
+    print(chromossome+orientation)
 
-    #df = pd.read_excel("../data/output1/4 types of contigs 8 samples.xlsx",sheet_name = chromossome)
-    molec_id = selecting_molecules(df,chromossome)
+    df = pd.read_excel("../data/output1/4 types of contigs 8 samples.xlsx",sheet_name = chromossome+orientation)
+    molec_id = selecting_molecules(df)
 
     empty_bins =  mk_categories()
     
@@ -229,7 +284,7 @@ def main():
     
     general_dist_avg,contig_gap_dist_avg = finding_averages(df,contig,molec_id) 
     
-    bins = classify_molecules(df,empty_bins,molec_id,contig,general_dist_avg,contig_gap_dist_avg)
+    bins = classify_molecules(df,empty_bins,molec_id,contig,general_dist_avg,contig_gap_dist_avg,orientation+chromossome)
 
     
     print(bins)
