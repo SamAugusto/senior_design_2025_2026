@@ -1,6 +1,7 @@
 import pandas as pd
 from collections import defaultdict
 import numpy as np
+
 def selecting_molecules(df):
     '''Selecting all molecules possible function '''
     unique_df_min = df.drop_duplicates(subset=["Molecule ID"],keep = "first")
