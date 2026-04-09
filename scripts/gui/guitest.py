@@ -5,168 +5,8 @@ import os
 import csv
 import re
 import pandas as pd
-from collections import defaultdict
-import numpy as np
 
-
-# ===== Analysis Functions (from main.py) =====
-
-def selecting_molecules(df):
-    unique_df_min = df.drop_duplicates(subset=["Molecule ID"], keep="first")
-    unique_df_max = df.drop_duplicates(subset=["Molecule ID"], keep="last")
-    molec_id = dict(zip(
-        unique_df_min["Molecule ID"],
-        zip(
-            unique_df_min["Qmap_position"], unique_df_min["siteID"],
-            unique_df_max["Qmap_position"], unique_df_max["siteID"],
-            unique_df_min["Ori"]
-        )
-    ))
-    return molec_id
-
-
-def mk_categories():
-    categories = ["fused_telomere", "not_fused_telomere_(normal)", "not_fused_no_telomere", "fused_no_telomere"]
-    bins = defaultdict(set)
-    for cat in categories:
-        bins[cat]
-    return bins
-
-
-def finding_averages(df, contig, molec_id):
-    general_dist_array = []
-    contig_gap_dist = defaultdict(list)
-
-    for molecule in molec_id.keys():
-        mask = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig)
-        try:
-            idx = df.index[mask][0]
-            current_pos = df.iloc[idx, 5]
-            red_mask_before = df.iloc[idx - 1, 6]
-            red_mask_after = df.iloc[idx + 1, 6]
-
-            if red_mask_before == 1 or red_mask_after == 1:
-                if red_mask_before == 1:
-                    neighbor_pos = df.iloc[idx - 1, 5]
-                    general_dist_array.append(current_pos - neighbor_pos)
-                if red_mask_after == 1:
-                    neighbor_pos = df.iloc[idx + 1, 5]
-                    general_dist_array.append(current_pos - neighbor_pos)
-
-            for i in range(0, 11):
-                if contig + 5 - i == contig:
-                    continue
-                mask_i = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig + 5 - i)
-                if not df[mask_i].empty:
-                    gap_distance = abs(df[mask].iloc[0, 5] - df[mask_i].iloc[0, 5])
-                    contig_gap_dist[contig + 5 - i].append(gap_distance)
-        except IndexError:
-            continue
-
-    general_dist_avg = float(np.average(general_dist_array)) if general_dist_array else 0.0
-    contig_gap_dist_avg = {k: float(np.average(v)) for k, v in contig_gap_dist.items()}
-    return general_dist_avg, contig_gap_dist_avg
-
-
-def classify_molecules(df, bins, molec_id, contig, label_avg, gap_avg, chrom_orientation):
-    for molecule in molec_id.keys():
-        mask = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig)
-
-        try:
-            idx = df.index[mask][0]
-        except IndexError:
-            # Try nearby contigs ±5
-            check = True
-            contig_cp_lst = [contig - 1, contig + 1, contig - 2, contig + 2,
-                             contig - 3, contig + 3, contig - 4, contig + 4,
-                             contig - 5, contig + 5]
-            contig_cp_idx = -1
-            while check:
-                if contig_cp_idx >= len(contig_cp_lst) - 1:
-                    break
-                contig_cp_idx += 1
-                contig_cp = contig_cp_lst[contig_cp_idx]
-                mask = (df["Molecule ID"] == molecule) & (df["Contig_Site"] == contig_cp)
-                try:
-                    idx = df.index[mask][0]
-                    red_mask_before = df.iloc[idx - 1, 6]
-                    red_mask_after = df.iloc[idx + 1, 6]
-                    check = False
-
-                    if red_mask_before == 1 or red_mask_after == 1:
-                        if red_mask_before == 1:
-                            qmap_pos = df.iloc[idx - 1, 5]
-                            row_pos = df.iloc[idx - 1, 7]
-                        else:
-                            qmap_pos = df.iloc[idx + 1, 5]
-                            row_pos = df.iloc[idx + 1, 7]
-                        distance_kb, row_distance = _calc_distances(
-                            molec_id[molecule], qmap_pos, row_pos, chrom_orientation)
-                        _add_to_bin(bins, molecule, distance_kb, row_distance, has_label=True)
-                    else:
-                        qmap_pos = df[mask].iloc[0, 5] + label_avg + gap_avg.get(contig_cp, 0)
-                        row_pos = df[mask].iloc[0, 7]
-                        distance_kb, row_distance = _calc_distances(
-                            molec_id[molecule], qmap_pos, row_pos, chrom_orientation)
-                        _add_to_bin(bins, molecule, distance_kb, row_distance, has_label=False)
-                except IndexError:
-                    continue
-            continue
-
-        red_mask_before = df.iloc[idx - 1, 6]
-        red_mask_after = df.iloc[idx + 1, 6]
-
-        if red_mask_before == 1 or red_mask_after == 1:
-            if red_mask_before == 1:
-                qmap_pos = df.iloc[idx - 1, 5]
-                row_pos = df.iloc[idx - 1, 7]
-            else:
-                qmap_pos = df.iloc[idx + 1, 5]
-                row_pos = df.iloc[idx + 1, 7]
-            distance_kb, row_distance = _calc_distances(
-                molec_id[molecule], qmap_pos, row_pos, chrom_orientation)
-            _add_to_bin(bins, molecule, distance_kb, row_distance, has_label=True)
-        else:
-            qmap_pos = df[mask].iloc[0, 5] + label_avg
-            row_pos = df[mask].iloc[0, 7]
-            distance_kb, row_distance = _calc_distances(
-                molec_id[molecule], qmap_pos, row_pos, chrom_orientation)
-            _add_to_bin(bins, molecule, distance_kb, row_distance, has_label=False)
-
-    return bins
-
-
-def _calc_distances(mol_data, qmap_pos, row_pos, chrom_orientation):
-    ori = mol_data[-1]
-    if "p" in chrom_orientation and ori == "+":
-        distance_kb = abs(mol_data[0] - qmap_pos)
-        row_distance = abs(mol_data[1] - row_pos)
-    elif "p" in chrom_orientation and ori == "-":
-        distance_kb = abs(mol_data[2] - qmap_pos)
-        row_distance = abs(mol_data[3] - row_pos)
-    elif "q" in chrom_orientation and ori == "+":
-        distance_kb = abs(mol_data[2] - qmap_pos)
-        row_distance = abs(mol_data[3] - row_pos)
-    elif "q" in chrom_orientation and ori == "-":
-        distance_kb = abs(mol_data[0] - qmap_pos)
-        row_distance = abs(mol_data[1] - row_pos)
-    else:
-        raise ValueError(f"Unexpected orientation combination: {chrom_orientation}, {ori}")
-    return distance_kb, row_distance
-
-
-def _add_to_bin(bins, molecule, distance_kb, row_distance, has_label):
-    entry = f"{molecule}_({distance_kb},{row_distance})"
-    if has_label:
-        if distance_kb >= 10_000:
-            bins["fused_telomere"].add(entry)
-        else:
-            bins["not_fused_telomere_(normal)"].add(entry)
-    else:
-        if distance_kb >= 10_000:
-            bins["fused_no_telomere"].add(entry)
-        else:
-            bins["not_fused_no_telomere"].add(entry)
+from main import selecting_molecules, mk_categories, finding_averages, classify_molecules
 
 
 def parse_bin_entry(entry):
@@ -195,6 +35,7 @@ class TelomereApp:
         self.root.geometry("1400x900")
 
         self.excel_path = tk.StringVar()
+        self.sheet_var = tk.StringVar()
         self.chromosome_var = tk.StringVar()
         self.orientation_var = tk.StringVar(value="p")
         self.contig_var = tk.StringVar()
@@ -238,27 +79,34 @@ class TelomereApp:
             row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5))
         ttk.Button(file_row, text="Browse", command=self._browse_excel, width=8).grid(row=0, column=1)
 
+        # Sheet picker
+        ttk.Label(inp, text="Sheet:").grid(row=1, column=0, sticky=tk.W, pady=4)
+        self._sheet_combo = ttk.Combobox(inp, textvariable=self.sheet_var,
+                                         state="readonly", width=20)
+        self._sheet_combo.grid(row=1, column=1, sticky=tk.W, pady=4)
+        self._sheet_combo.bind("<<ComboboxSelected>>", self._on_sheet_selected)
+
         # Chromosome
-        ttk.Label(inp, text="Chromosome:").grid(row=1, column=0, sticky=tk.W, pady=4)
+        ttk.Label(inp, text="Chromosome:").grid(row=2, column=0, sticky=tk.W, pady=4)
         ttk.Entry(inp, textvariable=self.chromosome_var, width=14).grid(
-            row=1, column=1, sticky=tk.W, pady=4)
+            row=2, column=1, sticky=tk.W, pady=4)
 
         # Orientation
-        ttk.Label(inp, text="Orientation:").grid(row=2, column=0, sticky=tk.W, pady=4)
+        ttk.Label(inp, text="Orientation:").grid(row=3, column=0, sticky=tk.W, pady=4)
         ori_frame = ttk.Frame(inp)
-        ori_frame.grid(row=2, column=1, sticky=tk.W, pady=4)
+        ori_frame.grid(row=3, column=1, sticky=tk.W, pady=4)
         ttk.Radiobutton(ori_frame, text="p arm", variable=self.orientation_var, value="p").grid(
             row=0, column=0, padx=(0, 12))
         ttk.Radiobutton(ori_frame, text="q arm", variable=self.orientation_var, value="q").grid(
             row=0, column=1)
 
         # Contig
-        ttk.Label(inp, text="Contig Site:").grid(row=3, column=0, sticky=tk.W, pady=4)
+        ttk.Label(inp, text="Contig Site:").grid(row=4, column=0, sticky=tk.W, pady=4)
         ttk.Entry(inp, textvariable=self.contig_var, width=14).grid(
-            row=3, column=1, sticky=tk.W, pady=4)
+            row=4, column=1, sticky=tk.W, pady=4)
 
         ttk.Button(inp, text="Run Analysis", command=self._run_analysis).grid(
-            row=4, column=0, columnspan=2, pady=(12, 0), ipadx=20, ipady=4)
+            row=5, column=0, columnspan=2, pady=(12, 0), ipadx=20, ipady=4)
 
         # Summary
         summ = ttk.LabelFrame(left, text="Summary", padding="10")
@@ -357,23 +205,43 @@ class TelomereApp:
 
     # ── Event handlers ───────────────────────────────────────────────────────
 
+    def _on_sheet_selected(self, _event=None):
+        """Auto-fill chromosome and orientation from sheet names like '4p+', '13q-'."""
+        sheet = self.sheet_var.get()
+        m = re.match(r'^(\d+)([pq])[+-]?$', sheet)
+        if m:
+            self.chromosome_var.set(m.group(1))
+            self.orientation_var.set(m.group(2))
+
     def _browse_excel(self):
         path = filedialog.askopenfilename(
             title="Select Excel file",
             filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
         )
-        if path:
-            self.excel_path.set(path)
-            self._set_status(f"File selected: {os.path.basename(path)}")
+        if not path:
+            return
+        self.excel_path.set(path)
+        try:
+            xl = pd.ExcelFile(path)
+            sheets = xl.sheet_names
+            self._sheet_combo["values"] = sheets
+            self.sheet_var.set(sheets[0])
+            self._set_status(f"Loaded: {os.path.basename(path)}  ({len(sheets)} sheet(s))")
+        except Exception as exc:
+            messagebox.showerror("Error", f"Could not read Excel file:\n{exc}")
 
     def _run_analysis(self):
         excel_file  = self.excel_path.get().strip()
+        sheet_name  = self.sheet_var.get().strip()
         chromosome  = self.chromosome_var.get().strip()
         orientation = self.orientation_var.get().strip()
         contig_str  = self.contig_var.get().strip()
 
         if not excel_file:
             messagebox.showwarning("Missing Input", "Please select an Excel file.")
+            return
+        if not sheet_name:
+            messagebox.showwarning("Missing Input", "Please select a sheet.")
             return
         if not chromosome:
             messagebox.showwarning("Missing Input", "Please enter a chromosome (e.g. 4).")
@@ -387,7 +255,6 @@ class TelomereApp:
             messagebox.showerror("Invalid Input", "Contig site must be an integer.")
             return
 
-        sheet_name = chromosome + orientation
         self._set_status(f"Running analysis — sheet '{sheet_name}', contig {contig}…")
         self.root.update_idletasks()
 
@@ -481,3 +348,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
